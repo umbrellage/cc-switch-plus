@@ -163,4 +163,21 @@ export class SessionScanner {
       return false
     }
   }
+
+  /** 查找指定 TTY 上运行的 claude 进程 PID（用于热切换时直接发信号退出） */
+  async findClaudePid(tty: string): Promise<number | null> {
+    const ttyName = tty.replace('/dev/', '')
+    try {
+      const { stdout } = await execFileAsync('ps', ['-o', 'pid,comm=', '-t', ttyName], { timeout: 3000 })
+      for (const line of stdout.trim().split('\n')) {
+        const parts = line.trim().split(/\s+/)
+        const pid = parseInt(parts[0], 10)
+        const comm = parts.slice(1).join(' ')
+        if (!isNaN(pid) && (comm === 'claude' || comm === 'claude.exe')) return pid
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
 }

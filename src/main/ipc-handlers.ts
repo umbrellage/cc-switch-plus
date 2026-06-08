@@ -11,7 +11,7 @@ const configManager = new ConfigManager()
 const hookInstaller = new HookInstaller()
 
 export function registerIpcHandlers() {
-  // 启动时自动检测空闲 session
+  autoInstallHook()
   autoDetect()
 
   // 配置管理
@@ -23,17 +23,24 @@ export function registerIpcHandlers() {
   // 会话管理
   ipcMain.handle(IPC_CHANNELS.SESSION_LIST, () => scanner.listSessions())
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_SWITCH, async (_e, _sessionId: string, shortName: string, tty: string) => {
+  ipcMain.handle(IPC_CHANNELS.SESSION_SWITCH, async (_e, _sessionId: string, shortName: string, tty: string, hotSwitch: boolean) => {
     sender.updateStatusOptimistically(shortName, tty)
 
     const sessions = await scanner.listSessions()
     const session = sessions.find((s) => s.tty === tty)
     if (!session) return
 
-    // SIGWINCH 方案：无需区分 busy/idle
-    // - 空闲时：trap 立即执行
-    // - claude 运行中：bash 自动排队 trap，claude 退出后执行
-    await sender.sendSwitchCommand(session, shortName)
+    // 热切换模式（busy 也能切）：App 直接退出 claude → trap 续接（切 env + claude -c）
+    if (hotSwitch) {
+      // bash 自动把 SIGWINCH trap 延迟到前台 claude 退出后才执行，所以无需 wait 循环
+      const cmd = `source ~/.bashrc_${shortName} && claude -c --permission-mode bypassPermissions`
+      await sender.sendToSession(session, cmd)
+      // 直接给 claude 进程发两次 SIGINT（= 两次 Ctrl+C），让它优雅退出并保存 session
+      const claudePid = await scanner.findClaudePid(tty)
+      if (claudePid) await sender.interruptClaude(claudePid)
+    } else {
+      await sender.sendSwitchCommand(session, shortName)
+    }
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_DETECT, async () => {
@@ -49,6 +56,19 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.HOOK_CHECK, () => hookInstaller.isInstalled())
   ipcMain.handle(IPC_CHANNELS.HOOK_INSTALL, () => hookInstaller.install())
   ipcMain.handle(IPC_CHANNELS.HOOK_UNINSTALL, () => hookInstaller.uninstall())
+  ipcMain.handle(IPC_CHANNELS.HOOK_NEEDS_UPGRADE, () => hookInstaller.needsUpgrade())
+  ipcMain.handle(IPC_CHANNELS.HOOK_UPGRADE, () => hookInstaller.upgrade())
+}
+
+async function autoInstallHook() {
+  try {
+    const installed = await hookInstaller.isInstalled()
+    if (!installed) {
+      await hookInstaller.install()
+    } else if (await hookInstaller.needsUpgrade()) {
+      await hookInstaller.upgrade()
+    }
+  } catch { /* ignore */ }
 }
 
 async function autoDetect() {

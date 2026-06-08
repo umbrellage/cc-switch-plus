@@ -9,9 +9,11 @@ export default function App() {
   const [sessions, setSessions] = useState<TerminalSession[]>([])
   const [configs, setConfigs] = useState<ModelConfig[]>([])
   const [hookInstalled, setHookInstalled] = useState(false)
+  const [hookNeedsUpgrade, setHookNeedsUpgrade] = useState(false)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
   const [pendingModel, setPendingModel] = useState<Record<string, string>>({})
   const [detecting, setDetecting] = useState(false)
+  const [hotSwitchSet, setHotSwitchSet] = useState<Set<string>>(new Set())
 
   const loadSessions = useCallback(async () => {
     try {
@@ -33,7 +35,11 @@ export default function App() {
   }, [])
 
   const loadHookStatus = useCallback(async () => {
-    setHookInstalled(await window.ccSwitch.hook.check())
+    const installed = await window.ccSwitch.hook.check()
+    setHookInstalled(installed)
+    if (installed) {
+      setHookNeedsUpgrade(await window.ccSwitch.hook.needsUpgrade())
+    }
   }, [])
 
   useEffect(() => {
@@ -49,11 +55,20 @@ export default function App() {
 
   const handleSwitchModel = async (sessionId: string, shortName: string, tty: string) => {
     if (!shortName) return
+    const hotSwitch = hotSwitchSet.has(sessionId)
     setPendingModel((prev) => ({ ...prev, [sessionId]: shortName }))
     setSwitchingId(sessionId)
     try {
-      await window.ccSwitch.session.switchModel(sessionId, shortName, tty)
-      loadSessions()
+      await window.ccSwitch.session.switchModel(sessionId, shortName, tty, hotSwitch)
+      // 热切换需 3-7 秒（claude 退出 + 重启），保持视觉反馈 + 持续刷新状态
+      if (hotSwitch) {
+        for (let i = 0; i < 8; i++) {
+          await new Promise((r) => setTimeout(r, 500))
+          loadSessions()
+        }
+      } else {
+        loadSessions()
+      }
     } catch (err) {
       setPendingModel((prev) => {
         const next = { ...prev }
@@ -64,6 +79,15 @@ export default function App() {
     } finally {
       setSwitchingId(null)
     }
+  }
+
+  const toggleHotSwitch = (sessionId: string) => {
+    setHotSwitchSet((prev) => {
+      const next = new Set(prev)
+      if (next.has(sessionId)) next.delete(sessionId)
+      else next.add(sessionId)
+      return next
+    })
   }
 
   const handleDetectModels = async () => {
@@ -109,9 +133,11 @@ export default function App() {
             configs={configs}
             switchingId={switchingId}
             pendingModel={pendingModel}
+            hotSwitchSet={hotSwitchSet}
             hookInstalled={hookInstalled}
             detecting={detecting}
             onSwitch={handleSwitchModel}
+            onToggleHotSwitch={toggleHotSwitch}
             onRefresh={loadSessions}
             onDetect={handleDetectModels}
           />
@@ -122,13 +148,20 @@ export default function App() {
         {activeTab === 'hook' && (
           <HookTab
             installed={hookInstalled}
+            needsUpgrade={hookNeedsUpgrade}
             onInstall={async () => {
               await window.ccSwitch.hook.install()
               setHookInstalled(true)
+              setHookNeedsUpgrade(false)
             }}
             onUninstall={async () => {
               await window.ccSwitch.hook.uninstall()
               setHookInstalled(false)
+              setHookNeedsUpgrade(false)
+            }}
+            onUpgrade={async () => {
+              await window.ccSwitch.hook.upgrade()
+              setHookNeedsUpgrade(false)
             }}
           />
         )}
@@ -174,15 +207,18 @@ interface SessionsTabProps {
   configs: ModelConfig[]
   switchingId: string | null
   pendingModel: Record<string, string>
+  hotSwitchSet: Set<string>
   hookInstalled: boolean
   detecting: boolean
   onSwitch: (sessionId: string, shortName: string, tty: string) => void
+  onToggleHotSwitch: (sessionId: string) => void
   onRefresh: () => void
   onDetect: () => void
 }
 
 function SessionsTab({
-  sessions, configs, switchingId, pendingModel, hookInstalled, detecting, onSwitch, onRefresh, onDetect
+  sessions, configs, switchingId, pendingModel, hotSwitchSet, hookInstalled, detecting,
+  onSwitch, onToggleHotSwitch, onRefresh, onDetect
 }: SessionsTabProps) {
   return (
     <div className="panel">
@@ -216,6 +252,8 @@ function SessionsTab({
             const matched = configs.find((c) => c.opusModel === session.currentModel)?.shortName ?? ''
             const selected = optimistic || matched
             const isSwitching = switchingId === session.sessionId
+            const hotSwitch = hotSwitchSet.has(session.sessionId)
+            const disabled = isSwitching || (session.isBusy && !hotSwitch)
 
             return (
               <div key={session.sessionId} className={`session-card ${isSwitching ? 'switching' : ''}`}>
@@ -226,7 +264,10 @@ function SessionsTab({
                       {session.isBusy ? '● claude 运行中' : '● 空闲'}
                     </span>
                     {isSwitching && (
-                      <span className="switch-hint pending">切换中</span>
+                      <span className="switch-hint pending">
+                        {hotSwitch ? '热切换中' : '切换中'}
+                        <span className="switch-dots" />
+                      </span>
                     )}
                   </div>
                   <div className="session-path" title={session.name}>
@@ -235,13 +276,23 @@ function SessionsTab({
                   <div className="session-tty">{session.tty.replace('/dev/', '')}</div>
                 </div>
                 <div className="session-action">
-                  <ModelPicker
-                    configs={configs}
-                    value={selected}
-                    placeholder={session.isBusy ? 'claude 运行中' : (session.currentModel && !selected ? `${session.currentModel} · 未匹配` : '选择模型...')}
-                    disabled={isSwitching || session.isBusy}
-                    onChange={(shortName) => onSwitch(session.sessionId, shortName, session.tty)}
-                  />
+                  <div className="action-row">
+                    <button
+                      className={`hot-switch ${hotSwitch ? 'on' : 'off'}`}
+                      onClick={() => onToggleHotSwitch(session.sessionId)}
+                      disabled={isSwitching}
+                      title={hotSwitch ? '热切换：claude 退出后自动续接到新模型' : '点击开启热切换'}
+                    >
+                      {hotSwitch ? '🔥 热切换' : '热切换'}
+                    </button>
+                    <ModelPicker
+                      configs={configs}
+                      value={selected}
+                      placeholder={disabled ? 'claude 运行中' : (session.currentModel && !selected ? `${session.currentModel} · 未匹配` : '选择模型...')}
+                      disabled={disabled}
+                      onChange={(shortName) => onSwitch(session.sessionId, shortName, session.tty)}
+                    />
+                  </div>
                 </div>
               </div>
             )
@@ -380,23 +431,36 @@ function ConfigForm({ config, onSave, onCancel }: { config: ModelConfig | null; 
 }
 
 /* ========== Hook Tab ========== */
-function HookTab({ installed, onInstall, onUninstall }: { installed: boolean; onInstall: () => Promise<void>; onUninstall: () => Promise<void> }) {
+function HookTab({ installed, needsUpgrade, onInstall, onUninstall, onUpgrade }: {
+  installed: boolean
+  needsUpgrade: boolean
+  onInstall: () => Promise<void>
+  onUninstall: () => Promise<void>
+  onUpgrade: () => Promise<void>
+}) {
   return (
     <div className="panel">
       <div className="hook-card">
         <div className="hook-status">
-          <span className={`dot ${installed ? 'on' : 'off'}`} />
+          <span className={`dot ${installed ? (needsUpgrade ? 'upgrade' : 'on') : 'off'}`} />
           <div>
-            <div className="hook-label">Shell Hook {installed ? '已安装' : '未安装'}</div>
+            <div className="hook-label">
+              Shell Hook {installed ? (needsUpgrade ? '需要升级' : '已安装') : '未安装'}
+            </div>
             <div className="hook-desc">
-              {installed
-                ? '每个新终端会自动上报当前模型状态。'
-                : '安装后终端会自动上报模型状态，无需手动检测。'}
+              {needsUpgrade
+                ? '有新版本可用，升级后新终端窗口生效。'
+                : installed
+                  ? '每个新终端会自动上报当前模型状态。'
+                  : '安装后终端会自动上报模型状态，无需手动检测。'}
             </div>
           </div>
         </div>
         <div className="hook-btns">
-          <button className="btn primary" onClick={onInstall} disabled={installed}>安装</button>
+          {needsUpgrade && (
+            <button className="btn primary" onClick={onUpgrade}>升级</button>
+          )}
+          <button className="btn primary" onClick={onInstall} disabled={installed && !needsUpgrade}>安装</button>
           <button className="btn danger" onClick={onUninstall} disabled={!installed}>卸载</button>
         </div>
       </div>

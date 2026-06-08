@@ -199,6 +199,25 @@ body {
 .session-card.switching {
   border-color: var(--blue);
   box-shadow: 0 0 0 2px rgba(80, 200, 255, 0.12);
+  position: relative;
+  overflow: hidden;
+}
+
+.session-card.switching::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--blue), transparent);
+  animation: switch-shimmer 1.6s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes switch-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
 }
 
 .session-info { flex: 1; min-width: 0; }
@@ -245,6 +264,34 @@ body {
   background: #fff4e6;
   color: var(--orange);
   border: 1px solid #ffe0c2;
+  animation: switch-pulse 1.4s ease-in-out infinite;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+@keyframes switch-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
+.switch-dots {
+  display: inline-block;
+  width: 14px;
+  text-align: left;
+  font-feature-settings: 'tnum';
+}
+
+.switch-dots::after {
+  content: '';
+  animation: switch-dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes switch-dots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
 }
 
 .session-path {
@@ -264,6 +311,36 @@ body {
 }
 
 .session-action { flex-shrink: 0; }
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hot-switch {
+  padding: 3px 8px;
+  font-size: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+  font-weight: 500;
+}
+
+.hot-switch:hover {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.hot-switch.on {
+  background: #fff4e6;
+  color: var(--orange);
+  border-color: #ffd9a8;
+}
 
 /* === Config Cards === */
 .config-list {
@@ -340,6 +417,7 @@ body {
 }
 
 .dot.on { background: var(--green); }
+.dot.upgrade { background: var(--orange); }
 .dot.off { background: var(--text-3); }
 
 .hook-label {

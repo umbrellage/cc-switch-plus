@@ -50,7 +50,9 @@ export const IPC_CHANNELS = {
   STATUS_READ: 'status:read',
   HOOK_CHECK: 'hook:check',
   HOOK_INSTALL: 'hook:install',
-  HOOK_UNINSTALL: 'hook:uninstall'
+  HOOK_UNINSTALL: 'hook:uninstall',
+  HOOK_NEEDS_UPGRADE: 'hook:needsUpgrade',
+  HOOK_UPGRADE: 'hook:upgrade'
 } as const
 
 /** Preload 暴露给渲染进程的 API */
@@ -63,7 +65,7 @@ export interface CCSwitchAPI {
   }
   session: {
     list: () => Promise<TerminalSession[]>
-    switchModel: (sessionId: string, shortName: string, tty: string) => Promise<void>
+    switchModel: (sessionId: string, shortName: string, tty: string, hotSwitch: boolean) => Promise<void>
     detectModels: () => Promise<void>
   }
   status: {
@@ -73,6 +75,8 @@ export interface CCSwitchAPI {
     check: () => Promise<boolean>
     install: () => Promise<void>
     uninstall: () => Promise<void>
+    needsUpgrade: () => Promise<boolean>
+    upgrade: () => Promise<void>
   }
 }
 

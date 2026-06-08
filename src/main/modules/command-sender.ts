@@ -43,6 +43,26 @@ export class CommandSender {
     }
   }
 
+  /**
+   * 向 claude 进程发送两次 SIGINT（等价于两次 Ctrl+C），让其优雅退出并保存会话。
+   * 注意：必须由 App 直接发给 claude 进程——bash 的 WINCH trap 被前台 claude 阻塞，
+   * 无法自行退出 claude（会死锁）。
+   */
+  async interruptClaude(claudePid: number): Promise<void> {
+    try {
+      process.kill(claudePid, 'SIGINT')
+    } catch {
+      return // 进程可能已退出
+    }
+    // 间隔约 80ms 再发一次，模拟「快速双击 Ctrl+C 退出」的时间窗口
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    try {
+      process.kill(claudePid, 'SIGINT')
+    } catch {
+      // 第一次已退出，忽略
+    }
+  }
+
   /** 更新状态文件（乐观） */
   updateStatusOptimistically(shortName: string, tty: string): void {
     const statusDir = '/tmp/cc-status'

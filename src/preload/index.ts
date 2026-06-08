@@ -10,8 +10,8 @@ const api: CCSwitchAPI = {
   },
   session: {
     list: () => ipcRenderer.invoke('session:list'),
-    switchModel: (sessionId, shortName, tty) =>
-      ipcRenderer.invoke('session:switch', sessionId, shortName, tty),
+    switchModel: (sessionId, shortName, tty, hotSwitch) =>
+      ipcRenderer.invoke('session:switch', sessionId, shortName, tty, hotSwitch),
     detectModels: () => ipcRenderer.invoke('session:detect')
   },
   status: {
@@ -20,7 +20,9 @@ const api: CCSwitchAPI = {
   hook: {
     check: () => ipcRenderer.invoke('hook:check'),
     install: () => ipcRenderer.invoke('hook:install'),
-    uninstall: () => ipcRenderer.invoke('hook:uninstall')
+    uninstall: () => ipcRenderer.invoke('hook:uninstall'),
+    needsUpgrade: () => ipcRenderer.invoke('hook:needsUpgrade'),
+    upgrade: () => ipcRenderer.invoke('hook:upgrade')
   }
 }
 
