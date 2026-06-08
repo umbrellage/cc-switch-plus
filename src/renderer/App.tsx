@@ -225,6 +225,9 @@ function SessionsTab({
                     <span className={`status ${session.isBusy ? 'busy' : 'idle'}`}>
                       {session.isBusy ? '● claude 运行中' : '● 空闲'}
                     </span>
+                    {isSwitching && (
+                      <span className="switch-hint pending">切换中</span>
+                    )}
                   </div>
                   <div className="session-path" title={session.name}>
                     {session.name || session.tty}
@@ -235,8 +238,8 @@ function SessionsTab({
                   <ModelPicker
                     configs={configs}
                     value={selected}
-                    placeholder={session.currentModel && !selected ? `${session.currentModel} · 未匹配` : '选择模型...'}
-                    disabled={isSwitching}
+                    placeholder={session.isBusy ? 'claude 运行中' : (session.currentModel && !selected ? `${session.currentModel} · 未匹配` : '选择模型...')}
+                    disabled={isSwitching || session.isBusy}
                     onChange={(shortName) => onSwitch(session.sessionId, shortName, session.tty)}
                   />
                 </div>
