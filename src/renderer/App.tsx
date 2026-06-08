@@ -82,7 +82,7 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="header-left">
-          <span className="logo">⬡</span>
+          <Logo />
           <h1 className="title">CC Switch Plus</h1>
         </div>
         <nav className="tabs">
@@ -134,6 +134,37 @@ export default function App() {
         )}
       </main>
     </div>
+  )
+}
+
+function Logo() {
+  return (
+    <svg className="logo" viewBox="0 0 1024 1024" width="22" height="22">
+      <defs>
+        <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#50C8FF" />
+          <stop offset="100%" stopColor="#7BA8FF" />
+        </linearGradient>
+        <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#B482FF" />
+          <stop offset="100%" stopColor="#D49EFF" />
+        </linearGradient>
+      </defs>
+      {/* 上方弧形箭头（蓝）*/}
+      <path
+        d="M 200,512 A 312,312 0 0 1 824,512 L 760,512 A 248,248 0 0 0 264,512 Z"
+        fill="url(#blueGrad)"
+      />
+      <polygon points="824,512 768,460 768,564" fill="url(#blueGrad)" />
+      {/* 下方弧形箭头（紫）*/}
+      <path
+        d="M 824,512 A 312,312 0 0 1 200,512 L 264,512 A 248,248 0 0 0 760,512 Z"
+        fill="url(#purpleGrad)"
+      />
+      <polygon points="200,512 256,564 256,460" fill="url(#purpleGrad)" />
+      {/* 中心点（橙）*/}
+      <circle cx="512" cy="512" r="36" fill="#FFA050" />
+    </svg>
   )
 }
 
