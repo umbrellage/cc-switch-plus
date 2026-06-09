@@ -23,6 +23,9 @@ const api: CCSwitchAPI = {
     uninstall: () => ipcRenderer.invoke('hook:uninstall'),
     needsUpgrade: () => ipcRenderer.invoke('hook:needsUpgrade'),
     upgrade: () => ipcRenderer.invoke('hook:upgrade')
+  },
+  app: {
+    getVersion: () => ipcRenderer.invoke('app:getVersion')
   }
 }
 

@@ -52,7 +52,8 @@ export const IPC_CHANNELS = {
   HOOK_INSTALL: 'hook:install',
   HOOK_UNINSTALL: 'hook:uninstall',
   HOOK_NEEDS_UPGRADE: 'hook:needsUpgrade',
-  HOOK_UPGRADE: 'hook:upgrade'
+  HOOK_UPGRADE: 'hook:upgrade',
+  APP_GET_VERSION: 'app:getVersion'
 } as const
 
 /** Preload 暴露给渲染进程的 API */
@@ -77,6 +78,9 @@ export interface CCSwitchAPI {
     uninstall: () => Promise<void>
     needsUpgrade: () => Promise<boolean>
     upgrade: () => Promise<void>
+  }
+  app: {
+    getVersion: () => Promise<string>
   }
 }
 

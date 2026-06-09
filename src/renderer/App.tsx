@@ -14,6 +14,7 @@ export default function App() {
   const [pendingModel, setPendingModel] = useState<Record<string, string>>({})
   const [detecting, setDetecting] = useState(false)
   const [hotSwitchSet, setHotSwitchSet] = useState<Set<string>>(new Set())
+  const [appVersion, setAppVersion] = useState('')
 
   const loadSessions = useCallback(async () => {
     try {
@@ -46,6 +47,7 @@ export default function App() {
     loadConfigs()
     loadHookStatus()
     loadSessions()
+    window.ccSwitch.app.getVersion().then(setAppVersion)
   }, [loadConfigs, loadHookStatus, loadSessions])
 
   useEffect(() => {
@@ -166,6 +168,9 @@ export default function App() {
           />
         )}
       </main>
+      <footer className="app-footer">
+        <span>CC Switch Plus v{appVersion}</span>
+      </footer>
     </div>
   )
 }
@@ -426,11 +431,11 @@ function ConfigForm({ config, onSave, onCancel }: { config: ModelConfig | null; 
           </div>
         </form>
       </div>
+      <VersionInfo />
     </div>
   )
 }
 
-/* ========== Hook Tab ========== */
 function HookTab({ installed, needsUpgrade, onInstall, onUninstall, onUpgrade }: {
   installed: boolean
   needsUpgrade: boolean

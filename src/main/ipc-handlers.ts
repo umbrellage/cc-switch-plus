@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, app } from 'electron'
 import { IPC_CHANNELS } from '../renderer/types'
 import { SessionScanner } from './modules/session-scanner'
 import { CommandSender } from './modules/command-sender'
@@ -58,6 +58,9 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.HOOK_UNINSTALL, () => hookInstaller.uninstall())
   ipcMain.handle(IPC_CHANNELS.HOOK_NEEDS_UPGRADE, () => hookInstaller.needsUpgrade())
   ipcMain.handle(IPC_CHANNELS.HOOK_UPGRADE, () => hookInstaller.upgrade())
+
+  // App
+  ipcMain.handle(IPC_CHANNELS.APP_GET_VERSION, () => app.getVersion())
 }
 
 async function autoInstallHook() {

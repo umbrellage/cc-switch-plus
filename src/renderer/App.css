@@ -420,6 +420,16 @@ body {
 .dot.upgrade { background: var(--orange); }
 .dot.off { background: var(--text-3); }
 
+.app-footer {
+  flex-shrink: 0;
+  text-align: center;
+  padding: 6px 0;
+  font-size: 11px;
+  color: var(--text-3);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
 .hook-label {
   font-size: 14px;
   font-weight: 500;
