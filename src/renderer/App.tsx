@@ -285,8 +285,12 @@ function SessionsTab({
                     <button
                       className={`hot-switch ${hotSwitch ? 'on' : 'off'}`}
                       onClick={() => onToggleHotSwitch(session.sessionId)}
-                      disabled={isSwitching}
-                      title={hotSwitch ? '热切换：claude 退出后自动续接到新模型' : '点击开启热切换'}
+                      disabled={isSwitching || !session.isBusy}
+                      title={!session.isBusy
+                        ? '仅 claude 运行中可用'
+                        : hotSwitch
+                          ? '热切换：claude 退出后自动续接到新模型'
+                          : '点击开启热切换'}
                     >
                       {hotSwitch ? '🔥 热切换' : '热切换'}
                     </button>
@@ -431,7 +435,6 @@ function ConfigForm({ config, onSave, onCancel }: { config: ModelConfig | null; 
           </div>
         </form>
       </div>
-      <VersionInfo />
     </div>
   )
 }
