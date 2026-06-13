@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { ModelConfig, TerminalSession } from '../types'
 
+/** Windows 不支持热切换 */
+const IS_WIN = /Win/i.test(navigator.platform)
+
 /** 匹配会话当前对应的配置 shortName：baseUrl 优先，opusModel 兜底 */
 function matchShortName(configs: ModelConfig[], s: TerminalSession): string {
   if (s.currentBaseUrl) {
@@ -71,14 +74,14 @@ export default function QuickSwitcher() {
     if (!focusedSession) return
     const shortName = selected[focusedSession.sessionId]
     if (!shortName) return
-    setSwitchingTty(focusedSession.tty)
+    setSwitchingTty(focusedSession.tty || focusedSession.sessionId)
     try {
-      // 运行中会话走热切换（与主窗口一致路径），空闲走普通切换
+      // 运行中会话走热切换（仅 mac）；Windows 无热切换
       await window.ccSwitch.session.switchModel(
         focusedSession.sessionId,
         shortName,
         focusedSession.tty,
-        focusedSession.isBusy
+        focusedSession.isBusy && !IS_WIN
       )
       await refresh()
       window.close()
