@@ -101,15 +101,14 @@ export class CommandSender {
   private updateStatusWin(shortName: string, shellPid: number): void {
     if (!existsSync(WIN_STATUS_DIR)) mkdirSync(WIN_STATUS_DIR, { recursive: true })
 
-    // 从 profile ps1 读模型/url
+    // 从 profile ps1 读模型/url（正则匹配 $env:VAR = 'value'）
     let modelValue = shortName
     let urlValue = ''
     try {
-      const { readFileSync: rf } = require('fs')
       const profilePath = join(homedir(), '.cc-switch-plus', 'profiles', `${shortName}.ps1`)
-      const content = rf(profilePath, 'utf-8')
-      const modelMatch = content.match(/ANTHROPIC_DEFAULT_OPUS_MODEL'\s*=\s*'([^']*)'/)
-      const urlMatch = content.match(/ANTHROPIC_BASE_URL'\s*=\s*'([^']*)'/)
+      const content = readFileSync(profilePath, 'utf-8')
+      const modelMatch = content.match(/ANTHROPIC_DEFAULT_OPUS_MODEL\s*=\s*'([^']*)'/)
+      const urlMatch = content.match(/ANTHROPIC_BASE_URL\s*=\s*'([^']*)'/)
       if (modelMatch) modelValue = modelMatch[1]
       if (urlMatch) urlValue = urlMatch[1]
     } catch { /* fallback */ }

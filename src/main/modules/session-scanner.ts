@@ -210,7 +210,8 @@ export class SessionScanner {
     const sessions: TerminalSession[] = []
     for (const proc of table.values()) {
       const baseName = proc.name.toLowerCase()
-      const isShell = baseName === 'powershell.exe' || baseName === 'pwsh.exe' || baseName === 'cmd.exe'
+      // 仅 PowerShell 支持 hook 机制（cmd 无 profile，列出也无法切换，故排除）
+      const isShell = baseName === 'powershell.exe' || baseName === 'pwsh.exe'
       if (!isShell) continue
 
       // 跳过无父进程（顶层系统 shell）
