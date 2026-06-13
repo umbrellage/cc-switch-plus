@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react'
 import type { ModelConfig, TerminalSession } from './types'
 import ModelPicker from './components/ModelPicker'
 
+/** Windows 不支持热切换（无信号机制） */
+const IS_WIN = /Win/i.test(navigator.platform)
+
 type Tab = 'sessions' | 'config' | 'hook'
 
 export default function App() {
@@ -278,22 +281,24 @@ function SessionsTab({
                   <div className="session-path" title={session.name}>
                     {session.name || session.tty}
                   </div>
-                  <div className="session-tty">{session.tty.replace('/dev/', '')}</div>
+                  <div className="session-tty">{session.tty ? session.tty.replace('/dev/', '') : session.sessionId}</div>
                 </div>
                 <div className="session-action">
                   <div className="action-row">
-                    <button
-                      className={`hot-switch ${hotSwitch ? 'on' : 'off'}`}
-                      onClick={() => onToggleHotSwitch(session.sessionId)}
-                      disabled={isSwitching || !session.isBusy}
-                      title={!session.isBusy
-                        ? '仅 claude 运行中可用'
-                        : hotSwitch
-                          ? '热切换：claude 退出后自动续接到新模型'
-                          : '点击开启热切换'}
-                    >
-                      {hotSwitch ? '🔥 热切换' : '热切换'}
-                    </button>
+                    {!IS_WIN && (
+                      <button
+                        className={`hot-switch ${hotSwitch ? 'on' : 'off'}`}
+                        onClick={() => onToggleHotSwitch(session.sessionId)}
+                        disabled={isSwitching || !session.isBusy}
+                        title={!session.isBusy
+                          ? '仅 claude 运行中可用'
+                          : hotSwitch
+                            ? '热切换：claude 退出后自动续接到新模型'
+                            : '点击开启热切换'}
+                      >
+                        {hotSwitch ? '🔥 热切换' : '热切换'}
+                      </button>
+                    )}
                     <ModelPicker
                       configs={configs}
                       value={selected}

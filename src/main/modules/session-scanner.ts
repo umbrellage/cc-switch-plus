@@ -3,11 +3,11 @@ import { promisify } from 'util'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { TerminalSession } from '../../renderer/types'
+import { IS_WIN, WIN_STATUS_DIR, winSessionKey } from '../platform'
 
 const execFileAsync = promisify(execFile)
 
-/** 已知终端应用映射 */
-const APP_PATTERNS: Array<{ match: RegExp; name: string }> = [
+const MAC_APP_PATTERNS: Array<{ match: RegExp; name: string }> = [
   { match: /iTerm/i, name: 'iTerm2' },
   { match: /Terminal/i, name: 'Terminal' },
   { match: /IntelliJ|idea/i, name: 'IDEA' },
@@ -17,57 +17,67 @@ const APP_PATTERNS: Array<{ match: RegExp; name: string }> = [
   { match: /login/i, name: '系统终端' }
 ]
 
-/** 通过 ppid 链追溯宿主应用 */
-async function traceHostApp(pid: number): Promise<string> {
-  let current = pid
-  for (let i = 0; i < 15; i++) {
-    try {
-      const { stdout } = await execFileAsync('ps', ['-o', 'ppid=', '-p', String(current)], { timeout: 3000 })
-      const ppid = parseInt(stdout.trim(), 10)
-      if (isNaN(ppid) || ppid <= 1) break
+const WIN_APP_PATTERNS: Array<{ match: RegExp; name: string }> = [
+  { match: /WindowsTerminal/i, name: 'Windows Terminal' },
+  { match: /WezTerm/i, name: 'WezTerm' },
+  { match: /Alacritty/i, name: 'Alacritty' },
+  { match: /IntelliJ|idea/i, name: 'IDEA' },
+  { match: /Cursor/i, name: 'Cursor' },
+  { match: /Code\.exe/i, name: 'VS Code' },
+  { match: /conhost/i, name: '控制台' }
+]
 
-      const { stdout: comm } = await execFileAsync('ps', ['-o', 'comm=', '-p', String(ppid)], { timeout: 3000 })
-      const name = comm.trim()
-
-      for (const pattern of APP_PATTERNS) {
-        if (pattern.match.test(name)) return pattern.name
-      }
-      current = ppid
-    } catch {
-      break
-    }
-  }
-  return '未知'
+interface WinProc {
+  pid: number
+  ppid: number
+  name: string
+  cmd: string
 }
 
-/**
- * 系统级会话扫描器
- * 通过 ps 枚举所有 TTY 上的 shell 会话，追溯宿主应用
- */
 export class SessionScanner {
-  /** 扫描所有 shell 会话 */
   async listSessions(): Promise<TerminalSession[]> {
-    const ttys = await this.getAllTtys()
-    const sessions: TerminalSession[] = []
+    return IS_WIN ? this.listSessionsWin() : this.listSessionsMac()
+  }
 
+  // ============ macOS ============
+
+  private async traceHostAppMac(pid: number): Promise<string> {
+    let current = pid
+    for (let i = 0; i < 15; i++) {
+      try {
+        const { stdout } = await execFileAsync('ps', ['-o', 'ppid=', '-p', String(current)], { timeout: 3000 })
+        const ppid = parseInt(stdout.trim(), 10)
+        if (isNaN(ppid) || ppid <= 1) break
+        const { stdout: comm } = await execFileAsync('ps', ['-o', 'comm=', '-p', String(ppid)], { timeout: 3000 })
+        const name = comm.trim()
+        for (const pattern of MAC_APP_PATTERNS) {
+          if (pattern.match.test(name)) return pattern.name
+        }
+        current = ppid
+      } catch {
+        break
+      }
+    }
+    return '未知'
+  }
+
+  private async listSessionsMac(): Promise<TerminalSession[]> {
+    const ttys = await this.getAllTtysMac()
+    const sessions: TerminalSession[] = []
     for (const tty of ttys) {
-      const session = await this.buildSession(tty)
+      const session = await this.buildSessionMac(tty)
       if (session) sessions.push(session)
     }
-
     return sessions
   }
 
-  /** 获取所有活跃的 TTY */
-  private async getAllTtys(): Promise<string[]> {
+  private async getAllTtysMac(): Promise<string[]> {
     try {
       const { stdout } = await execFileAsync('ps', ['-eo', 'tty'], { timeout: 5000 })
       const ttys = new Set<string>()
       for (const line of stdout.split('\n')) {
         const trimmed = line.trim()
-        if (trimmed.startsWith('ttys')) {
-          ttys.add(`/dev/${trimmed}`)
-        }
+        if (trimmed.startsWith('ttys')) ttys.add(`/dev/${trimmed}`)
       }
       return [...ttys].sort()
     } catch {
@@ -75,15 +85,13 @@ export class SessionScanner {
     }
   }
 
-  /** 为单个 TTY 构建 Session */
-  private async buildSession(tty: string): Promise<TerminalSession | null> {
+  private async buildSessionMac(tty: string): Promise<TerminalSession | null> {
     const ttyName = tty.replace('/dev/', '')
     try {
       const { stdout } = await execFileAsync('ps', ['-o', 'pid,ppid,comm=', '-t', ttyName], { timeout: 3000 })
       const processes = stdout.trim().split('\n').filter(Boolean)
       if (processes.length === 0) return null
 
-      // 找到主 shell 进程（bash/zsh）
       const shellLine = processes.find((p) => /bash|zsh|sh/.test(p))
       if (!shellLine) return null
 
@@ -92,24 +100,18 @@ export class SessionScanner {
       const shellPpid = parseInt(parts[1], 10)
       const shellComm = parts.slice(2).join(' ')
 
-      // 检测是否在运行 claude
       const isBusy = processes.some((p) => {
         const comm = p.trim().split(/\s+/).slice(2).join(' ')
         return comm === 'claude' || comm === 'claude.exe'
       })
 
-      // 追溯宿主应用
-      const appName = await traceHostApp(shellPpid)
+      const appName = await this.traceHostAppMac(shellPpid)
 
-      // 获取当前工作目录（帮助用户识别 session）
       let cwd = ''
       try {
         const { stdout } = await execFileAsync('lsof', ['-p', String(shellPid)], { timeout: 3000 })
-        const lines = stdout.split('\n')
-        for (const line of lines) {
+        for (const line of stdout.split('\n')) {
           const cols = line.trim().split(/\s+/)
-          // lsof 输出: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-          // cwd 行的 FD 列是 "cwd"
           if (cols[3] === 'cwd') {
             cwd = cols[cols.length - 1].replace(process.env.HOME || '', '~')
             break
@@ -117,67 +119,166 @@ export class SessionScanner {
         }
       } catch { /* ignore */ }
 
-      // 尝试从状态文件读取当前模型
-      const statusFile = tty.replace(/\//g, '_')
-      let currentModel: string | undefined
-      let currentBaseUrl: string | undefined
-      const statusPath = join('/tmp/cc-status', statusFile)
-      if (existsSync(statusPath)) {
-        try {
-          const content = readFileSync(statusPath, 'utf-8').trim()
-          const modelMatch = content.match(/MODEL=(\S+)/)
-          const urlMatch = content.match(/URL=(\S+)/)
-          if (modelMatch && modelMatch[1] !== 'unknown') currentModel = modelMatch[1]
-          if (urlMatch) currentBaseUrl = urlMatch[1]
-        } catch { /* ignore */ }
-      }
+      const status = this.readStatusMac(tty)
 
       return {
-        sessionId: tty,
-        windowId: 0,
-        windowIndex: 0,
-        tabIndex: 0,
-        tty,
+        sessionId: tty, windowId: 0, windowIndex: 0, tabIndex: 0, tty,
         name: cwd || `${appName} - ${shellComm}`,
-        columns: 0,
-        rows: 0,
-        profileName: appName,
-        appName,
-        shellPid,
-        isBusy,
-        currentModel,
-        currentBaseUrl
+        columns: 0, rows: 0, profileName: appName, appName,
+        shellPid, isBusy, currentModel: status?.model, currentBaseUrl: status?.baseUrl
       }
     } catch {
       return null
     }
   }
 
-  /** 检测指定 TTY 上是否有 claude 进程 */
-  async isClaudeRunning(tty: string): Promise<boolean> {
-    const ttyName = tty.replace('/dev/', '')
+  private readStatusMac(tty: string): { model?: string; baseUrl?: string } | undefined {
+    const statusFile = tty.replace(/\//g, '_')
+    const statusPath = join('/tmp/cc-status', statusFile)
+    if (!existsSync(statusPath)) return undefined
     try {
-      const { stdout } = await execFileAsync('ps', ['-o', 'comm=', '-t', ttyName], { timeout: 3000 })
-      return stdout.trim().split('\n').some((p) => p.trim() === 'claude' || p.trim() === 'claude.exe')
+      const content = readFileSync(statusPath, 'utf-8').trim()
+      const modelMatch = content.match(/MODEL=(\S+)/)
+      const urlMatch = content.match(/URL=(\S+)/)
+      return {
+        model: modelMatch && modelMatch[1] !== 'unknown' ? modelMatch[1] : undefined,
+        baseUrl: urlMatch?.[1]
+      }
     } catch {
-      return false
+      return undefined
     }
   }
 
-  /** 查找指定 TTY 上运行的 claude 进程 PID（用于热切换时直接发信号退出） */
-  async findClaudePid(tty: string): Promise<number | null> {
-    const ttyName = tty.replace('/dev/', '')
+  // ============ Windows ============
+
+  private async getWinProcessTable(): Promise<Map<number, WinProc>> {
+    const table = new Map<number, WinProc>()
     try {
-      const { stdout } = await execFileAsync('ps', ['-o', 'pid,comm=', '-t', ttyName], { timeout: 3000 })
-      for (const line of stdout.trim().split('\n')) {
-        const parts = line.trim().split(/\s+/)
-        const pid = parseInt(parts[0], 10)
-        const comm = parts.slice(1).join(' ')
-        if (!isNaN(pid) && (comm === 'claude' || comm === 'claude.exe')) return pid
+      const { stdout } = await execFileAsync(
+        'powershell',
+        ['-NoProfile', '-Command',
+         'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress'],
+        { timeout: 8000 }
+      )
+      const data = JSON.parse(stdout.trim() || '[]')
+      const arr = Array.isArray(data) ? data : [data]
+      for (const p of arr) {
+        if (p && typeof p.ProcessId === 'number') {
+          table.set(p.ProcessId, {
+            pid: p.ProcessId,
+            ppid: p.ParentProcessId || 0,
+            name: p.Name || '',
+            cmd: p.CommandLine || ''
+          })
+        }
       }
-      return null
     } catch {
-      return null
+      // PowerShell 失败则空表
     }
+    return table
+  }
+
+  private traceHostAppWin(shellPid: number, table: Map<number, WinProc>): string {
+    let current: number | undefined = shellPid
+    for (let i = 0; i < 15 && current !== undefined; i++) {
+      const proc = table.get(current)
+      if (!proc) break
+      for (const pattern of WIN_APP_PATTERNS) {
+        if (pattern.match.test(proc.name)) return pattern.name
+      }
+      current = proc.ppid
+    }
+    return '未知'
+  }
+
+  private async listSessionsWin(): Promise<TerminalSession[]> {
+    const table = await this.getWinProcessTable()
+    if (table.size === 0) return []
+
+    const sessions: TerminalSession[] = []
+    for (const proc of table.values()) {
+      const baseName = proc.name.toLowerCase()
+      // 仅 PowerShell 支持 hook（cmd 无 profile，列出也无法切换）
+      const isShell = baseName === 'powershell.exe' || baseName === 'pwsh.exe'
+      if (!isShell) continue
+      if (proc.ppid <= 0) continue
+
+      const appName = this.traceHostAppWin(proc.pid, table)
+      const claude = this.findClaudeChildWin(proc.pid, table)
+      const status = this.readStatusWin(proc.pid)
+
+      sessions.push({
+        sessionId: winSessionKey(proc.pid),
+        windowId: 0, windowIndex: 0, tabIndex: 0,
+        tty: '',
+        name: `${appName} - ${baseName.replace('.exe', '')}`,
+        columns: 0, rows: 0, profileName: appName, appName,
+        shellPid: proc.pid,
+        isBusy: !!claude,
+        currentModel: status?.model,
+        currentBaseUrl: status?.baseUrl
+      })
+    }
+    return sessions
+  }
+
+  private findClaudeChildWin(shellPid: number, table: Map<number, WinProc>): number | null {
+    const childrenOf = new Map<number, number[]>()
+    for (const p of table.values()) {
+      const arr = childrenOf.get(p.ppid) || []
+      arr.push(p.pid)
+      childrenOf.set(p.ppid, arr)
+    }
+    const stack = [shellPid]
+    const visited = new Set<number>()
+    while (stack.length) {
+      const cur = stack.pop()!
+      if (visited.has(cur)) continue
+      visited.add(cur)
+      const proc = table.get(cur)
+      if (!proc) continue
+      if (/claude/i.test(proc.name) || /claude/i.test(proc.cmd)) return cur
+      for (const child of childrenOf.get(cur) || []) stack.push(child)
+    }
+    return null
+  }
+
+  private readStatusWin(shellPid: number): { model?: string; baseUrl?: string } | undefined {
+    const statusPath = join(WIN_STATUS_DIR, winSessionKey(shellPid))
+    if (!existsSync(statusPath)) return undefined
+    try {
+      const content = readFileSync(statusPath, 'utf-8').trim()
+      const modelMatch = content.match(/MODEL=(\S+)/)
+      const urlMatch = content.match(/URL=(\S+)/)
+      return {
+        model: modelMatch && modelMatch[1] !== 'unknown' ? modelMatch[1] : undefined,
+        baseUrl: urlMatch?.[1]
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  async findClaudePid(sessionKey: string): Promise<number | null> {
+    if (!IS_WIN) {
+      const ttyName = sessionKey.replace('/dev/', '')
+      try {
+        const { stdout } = await execFileAsync('ps', ['-o', 'pid,comm=', '-t', ttyName], { timeout: 3000 })
+        for (const line of stdout.trim().split('\n')) {
+          const parts = line.trim().split(/\s+/)
+          const pid = parseInt(parts[0], 10)
+          const comm = parts.slice(1).join(' ')
+          if (!isNaN(pid) && (comm === 'claude' || comm === 'claude.exe')) return pid
+        }
+        return null
+      } catch {
+        return null
+      }
+    }
+    const table = await this.getWinProcessTable()
+    const m = sessionKey.match(/^pid_(\d+)$/)
+    const shellPid = m ? parseInt(m[1], 10) : NaN
+    if (isNaN(shellPid)) return null
+    return this.findClaudeChildWin(shellPid, table)
   }
 }
