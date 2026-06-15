@@ -1,3 +1,6 @@
+/** shell 类型：决定切换命令（dot-source .ps1 vs source .bashrc_xxx）与 hook 机制 */
+export type ShellKind = 'powershell' | 'pwsh' | 'bash'
+
 /** 模型配置 */
 export interface ModelConfig {
   id: string
@@ -27,6 +30,7 @@ export interface TerminalSession {
   profileName: string   // 兼容保留，现在存宿主应用名
   appName: string       // 宿主应用：iTerm2 / Terminal / IDEA / Cursor / VS Code
   shellPid: number      // shell 进程 PID
+  shell: ShellKind      // shell 类型：决定切换命令与 hook 机制
   isBusy: boolean       // claude 是否在运行
   currentModel?: string
   currentBaseUrl?: string

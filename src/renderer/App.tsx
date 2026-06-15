@@ -17,6 +17,8 @@ export default function App() {
   const [pendingModel, setPendingModel] = useState<Record<string, string>>({})
   const [detecting, setDetecting] = useState(false)
   const [hotSwitchSet, setHotSwitchSet] = useState<Set<string>>(new Set())
+  /** Windows 暖切换提示：sessionId → 目标 shortName（claude 退出后续接，需用户手动 Ctrl+C） */
+  const [warmHint, setWarmHint] = useState<Record<string, string>>({})
   const [appVersion, setAppVersion] = useState('')
 
   const loadSessions = useCallback(async () => {
@@ -58,6 +60,25 @@ export default function App() {
     return () => clearInterval(timer)
   }, [loadSessions])
 
+  // 暖切换：检测到目标模型已生效时自动清除提示
+  useEffect(() => {
+    if (Object.keys(warmHint).length === 0) return
+    setWarmHint((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const [sid, target] of Object.entries(next)) {
+        const session = sessions.find((s) => s.sessionId === sid)
+        if (!session) continue
+        const targetCfg = configs.find((c) => c.shortName === target)
+        if (targetCfg && session.currentModel && session.currentModel === targetCfg.opusModel) {
+          delete next[sid]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [sessions, configs, warmHint])
+
   const handleSwitchModel = async (sessionId: string, shortName: string, tty: string) => {
     if (!shortName) return
     const hotSwitch = hotSwitchSet.has(sessionId)
@@ -67,6 +88,8 @@ export default function App() {
       await window.ccSwitch.session.switchModel(sessionId, shortName, tty, hotSwitch)
       // 热切换需 3-7 秒（claude 退出 + 重启），保持视觉反馈 + 持续刷新状态
       if (hotSwitch) {
+        // Windows 暖切换：无法自动中断 claude，提示用户按 Ctrl+C；待检测到目标模型后清除
+        if (IS_WIN) setWarmHint((prev) => ({ ...prev, [sessionId]: shortName }))
         for (let i = 0; i < 8; i++) {
           await new Promise((r) => setTimeout(r, 500))
           loadSessions()
@@ -139,10 +162,14 @@ export default function App() {
             switchingId={switchingId}
             pendingModel={pendingModel}
             hotSwitchSet={hotSwitchSet}
+            warmHint={warmHint}
             hookInstalled={hookInstalled}
             detecting={detecting}
             onSwitch={handleSwitchModel}
             onToggleHotSwitch={toggleHotSwitch}
+            onDismissWarmHint={(sid) => setWarmHint((prev) => {
+              const next = { ...prev }; delete next[sid]; return next
+            })}
             onRefresh={loadSessions}
             onDetect={handleDetectModels}
           />
@@ -216,17 +243,19 @@ interface SessionsTabProps {
   switchingId: string | null
   pendingModel: Record<string, string>
   hotSwitchSet: Set<string>
+  warmHint: Record<string, string>
   hookInstalled: boolean
   detecting: boolean
   onSwitch: (sessionId: string, shortName: string, tty: string) => void
   onToggleHotSwitch: (sessionId: string) => void
+  onDismissWarmHint: (sessionId: string) => void
   onRefresh: () => void
   onDetect: () => void
 }
 
 function SessionsTab({
-  sessions, configs, switchingId, pendingModel, hotSwitchSet, hookInstalled, detecting,
-  onSwitch, onToggleHotSwitch, onRefresh, onDetect
+  sessions, configs, switchingId, pendingModel, hotSwitchSet, warmHint, hookInstalled, detecting,
+  onSwitch, onToggleHotSwitch, onDismissWarmHint, onRefresh, onDetect
 }: SessionsTabProps) {
   return (
     <div className="panel">
@@ -262,6 +291,8 @@ function SessionsTab({
             const isSwitching = switchingId === session.sessionId
             const hotSwitch = hotSwitchSet.has(session.sessionId)
             const disabled = isSwitching || (session.isBusy && !hotSwitch)
+            const warmTarget = warmHint[session.sessionId]
+            const hotLabel = IS_WIN ? (hotSwitch ? '🔥 暖切换' : '暖切换') : (hotSwitch ? '🔥 热切换' : '热切换')
 
             return (
               <div key={session.sessionId} className={`session-card ${isSwitching ? 'switching' : ''}`}>
@@ -273,7 +304,7 @@ function SessionsTab({
                     </span>
                     {isSwitching && (
                       <span className="switch-hint pending">
-                        {hotSwitch ? '热切换中' : '切换中'}
+                        {hotSwitch ? (IS_WIN ? '暖切换中' : '热切换中') : '切换中'}
                         <span className="switch-dots" />
                       </span>
                     )}
@@ -282,23 +313,27 @@ function SessionsTab({
                     {session.name || session.tty}
                   </div>
                   <div className="session-tty">{session.tty ? session.tty.replace('/dev/', '') : session.sessionId}</div>
+                  {warmTarget && (
+                    <div className="warm-hint">
+                      <span>已发送切换到 <b>{warmTarget}</b>，请按一次 <kbd>Ctrl+C</kbd> 退出 claude 以续接新模型</span>
+                      <button className="warm-dismiss" onClick={() => onDismissWarmHint(session.sessionId)}>✕</button>
+                    </div>
+                  )}
                 </div>
                 <div className="session-action">
                   <div className="action-row">
-                    {!IS_WIN && (
-                      <button
-                        className={`hot-switch ${hotSwitch ? 'on' : 'off'}`}
-                        onClick={() => onToggleHotSwitch(session.sessionId)}
-                        disabled={isSwitching || !session.isBusy}
-                        title={!session.isBusy
-                          ? '仅 claude 运行中可用'
-                          : hotSwitch
-                            ? '热切换：claude 退出后自动续接到新模型'
-                            : '点击开启热切换'}
-                      >
-                        {hotSwitch ? '🔥 热切换' : '热切换'}
-                      </button>
-                    )}
+                    <button
+                      className={`hot-switch ${hotSwitch ? 'on' : 'off'}`}
+                      onClick={() => onToggleHotSwitch(session.sessionId)}
+                      disabled={isSwitching || !session.isBusy}
+                      title={!session.isBusy
+                        ? '仅 claude 运行中可用'
+                        : IS_WIN
+                          ? '暖切换：claude 退出后自动续接到新模型（Windows 需手动 Ctrl+C）'
+                          : '热切换：claude 退出后自动续接到新模型'}
+                    >
+                      {hotLabel}
+                    </button>
                     <ModelPicker
                       configs={configs}
                       value={selected}
@@ -321,12 +356,19 @@ function SessionsTab({
 function ConfigTab({ configs, onRefresh }: { configs: ModelConfig[]; onRefresh: () => void }) {
   const [editing, setEditing] = useState<ModelConfig | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   const handleSave = async (config: ModelConfig) => {
-    await window.ccSwitch.config.save(config)
-    setShowForm(false)
-    setEditing(null)
-    onRefresh()
+    setSaveError('')
+    try {
+      await window.ccSwitch.config.save(config)
+      setShowForm(false)
+      setEditing(null)
+      onRefresh()
+    } catch (err) {
+      // 保存失败：保留表单可编辑，显示错误，不关闭弹窗
+      setSaveError(`保存失败: ${(err as Error).message}`)
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -351,7 +393,12 @@ function ConfigTab({ configs, onRefresh }: { configs: ModelConfig[]; onRefresh: 
       </div>
 
       {showForm && (
-        <ConfigForm config={editing} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null) }} />
+        <ConfigForm
+          config={editing}
+          saveError={saveError}
+          onSave={handleSave}
+          onCancel={() => { setShowForm(false); setEditing(null); setSaveError('') }}
+        />
       )}
 
       <div className="config-list">
@@ -376,7 +423,26 @@ function ConfigTab({ configs, onRefresh }: { configs: ModelConfig[]; onRefresh: 
 }
 
 /* ========== Config Form ========== */
-function ConfigForm({ config, onSave, onCancel }: { config: ModelConfig | null; onSave: (c: ModelConfig) => void; onCancel: () => void }) {
+
+/** 内置预设：选厂商自动填充 baseUrl/模型名，用户只需补 token。
+ *  新增预设：在此追加一项即可（需提供真实可用的 baseUrl 与模型 id）。 */
+const PRESETS: Array<Partial<ModelConfig> & { key: string; label: string }> = [
+  {
+    key: 'glm', label: 'GLM 智谱',
+    name: 'GLM-5.1 (智谱)', shortName: 'glm',
+    baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+    opusModel: 'GLM-5.1', sonnetModel: 'glm-5', haikuModel: 'glm-4.7', apiTimeout: 300000
+  }
+]
+
+function ConfigForm({
+  config, saveError, onSave, onCancel
+}: {
+  config: ModelConfig | null
+  saveError: string
+  onSave: (c: ModelConfig) => void
+  onCancel: () => void
+}) {
   const isEdit = !!config
   const [form, setForm] = useState<ModelConfig>(
     config ?? {
@@ -385,21 +451,45 @@ function ConfigForm({ config, onSave, onCancel }: { config: ModelConfig | null; 
       createdAt: Date.now(), updatedAt: Date.now()
     }
   )
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
   const handleChange = (field: keyof ModelConfig, value: string | number) => {
     setForm((prev) => ({ ...prev, [field]: value }))
+    // 输入即清掉该字段错误
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }))
+  }
+
+  /** 应用预设：仅编辑/新增态可用，覆盖 name/shortName/baseUrl/模型名，保留 token */
+  const applyPreset = (preset: typeof PRESETS[number]) => {
+    setForm((prev) => ({
+      ...prev,
+      name: preset.name ?? prev.name,
+      shortName: preset.shortName ?? prev.shortName,
+      baseUrl: preset.baseUrl ?? prev.baseUrl,
+      opusModel: preset.opusModel ?? prev.opusModel,
+      sonnetModel: preset.sonnetModel ?? prev.sonnetModel,
+      haikuModel: preset.haikuModel ?? prev.haikuModel,
+      apiTimeout: preset.apiTimeout ?? prev.apiTimeout
+    }))
+    setErrors({})
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.name || !form.shortName || !form.authToken || !form.baseUrl) {
-      alert('请填写必填字段')
+    const next: Record<string, string> = {}
+    if (!form.name) next.name = '必填'
+    if (!form.shortName) next.shortName = '必填'
+    if (!form.authToken) next.authToken = '必填'
+    if (!form.baseUrl) next.baseUrl = '必填'
+    else if (!/^https?:\/\//.test(form.baseUrl)) next.baseUrl = '需以 http(s):// 开头'
+    if (form.shortName && !/^[a-zA-Z0-9_-]+$/.test(form.shortName)) {
+      next.shortName = '仅允许字母、数字、下划线、连字符'
+    }
+    if (Object.keys(next).length > 0) {
+      setErrors(next)
       return
     }
-    if (!/^[a-zA-Z0-9_-]+$/.test(form.shortName)) {
-      alert('标识只能包含字母、数字、下划线和连字符')
-      return
-    }
+    setErrors({})
     onSave(form)
   }
 
@@ -407,19 +497,38 @@ function ConfigForm({ config, onSave, onCancel }: { config: ModelConfig | null; 
     <div className="overlay">
       <div className="modal">
         <h3>{isEdit ? '编辑配置' : '新增配置'}</h3>
+        {!isEdit && (
+          <div className="preset-row">
+            <span className="preset-label">内置预设</span>
+            {PRESETS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                className={`chip ${form.shortName === p.shortName ? 'active' : ''}`}
+                onClick={() => applyPreset(p)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
         <form onSubmit={handleSubmit}>
           <div className="fields">
             <label>名称 *
               <input value={form.name} onChange={(e) => handleChange('name', e.target.value)} placeholder="GLM-5.1 (智谱)" />
+              {errors.name && <span className="field-err">{errors.name}</span>}
             </label>
-            <label>标识 * <span className="sub">→ ~/.bashrc_标识</span>
+            <label>标识 * <span className="sub">→ profile 文件名</span>
               <input value={form.shortName} onChange={(e) => handleChange('shortName', e.target.value)} placeholder="glm" disabled={isEdit} />
+              {errors.shortName && <span className="field-err">{errors.shortName}</span>}
             </label>
             <label className="w2">Auth Token *
               <input value={form.authToken} onChange={(e) => handleChange('authToken', e.target.value)} placeholder="ANTHROPIC_AUTH_TOKEN" />
+              {errors.authToken && <span className="field-err">{errors.authToken}</span>}
             </label>
             <label className="w2">Base URL *
               <input value={form.baseUrl} onChange={(e) => handleChange('baseUrl', e.target.value)} placeholder="https://open.bigmodel.cn/api/anthropic" />
+              {errors.baseUrl && <span className="field-err">{errors.baseUrl}</span>}
             </label>
             <label>Opus 模型
               <input value={form.opusModel || ''} onChange={(e) => handleChange('opusModel', e.target.value)} placeholder="GLM-5.1" />
@@ -434,6 +543,7 @@ function ConfigForm({ config, onSave, onCancel }: { config: ModelConfig | null; 
               <input type="number" value={form.apiTimeout || 300000} onChange={(e) => handleChange('apiTimeout', parseInt(e.target.value, 10))} />
             </label>
           </div>
+          {saveError && <div className="form-err">{saveError}</div>}
           <div className="form-btns">
             <button type="button" className="btn ghost" onClick={onCancel}>取消</button>
             <button type="submit" className="btn primary">保存</button>

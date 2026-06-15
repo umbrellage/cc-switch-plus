@@ -50,7 +50,7 @@ update_cc_status
 ${HOOK_END}`
 
 // win —— PowerShell profile（PS5 + PS7 两个位置都装）
-const HOOK_VERSION_WIN = 1
+const HOOK_VERSION_WIN = 2
 const PS5_PROFILE = join(HOME, 'Documents', 'WindowsPowerShell', 'Microsoft.PowerShell_profile.ps1')
 const PS7_PROFILE = join(HOME, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1')
 
@@ -88,6 +88,34 @@ function prompt {
 __cc_update_status
 ${PS_HOOK_END}`
 
+// win git-bash —— ~/.bashrc（与 PowerShell 共用 ~/.cc-switch-plus/{pending,status}，key=pid_$$）
+const GB_PROFILE = join(HOME, '.bashrc')
+const GB_HOOK_BEGIN = '# >>> cc-switch-plus hook (git-bash) >>>'
+const GB_HOOK_END = '# <<< cc-switch-plus hook (git-bash) <<<'
+const GB_HOOK_SNIPPET = `${GB_HOOK_BEGIN}
+# hook-version: ${HOOK_VERSION_WIN}
+# git-bash：MSYS bash 无外部信号；PROMPT_COMMAND 轮询 pending + 上报状态。
+# 与 PS 共用目录，key=pid_$$（$$=当前 bash PID，与扫描到的 bash.exe PID 一致）
+__cc_gb_dir="$HOME/.cc-switch-plus"
+__cc_update_status() {
+    mkdir -p "$__cc_gb_dir/status"
+    printf 'MODEL=%s URL=%s\\n' "\${ANTHROPIC_DEFAULT_OPUS_MODEL:-unknown}" "\${ANTHROPIC_BASE_URL:-unknown}" > "$__cc_gb_dir/status/pid_\$\$"
+}
+__cc_exec_pending() {
+    local __cc_f="$__cc_gb_dir/pending/pid_\$\$"
+    if [ -f "\$__cc_f" ]; then
+        local __cc_cmd; __cc_cmd=\$(cat "\$__cc_f"); rm -f "\$__cc_f"
+        [ -n "\$__cc_cmd" ] && eval "\$__cc_cmd"
+    fi
+}
+__cc_gb_prompt_hook() { __cc_exec_pending; __cc_update_status; }
+case ":\$PROMPT_COMMAND:" in
+    *:__cc_gb_prompt_hook:*) ;;
+    *) PROMPT_COMMAND="__cc_gb_prompt_hook\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}" ;;
+esac
+__cc_update_status
+${GB_HOOK_END}`
+
 export class HookInstaller {
   /** 检查 Hook 是否已安装 */
   async isInstalled(): Promise<boolean> {
@@ -110,6 +138,7 @@ export class HookInstaller {
     if (IS_WIN) {
       this.installPsProfile(PS5_PROFILE)
       this.installPsProfile(PS7_PROFILE)
+      this.installGitBash()
     } else {
       this.installBash()
     }
@@ -119,6 +148,13 @@ export class HookInstaller {
     const content = existsSync(BASHRC_PATH) ? readFileSync(BASHRC_PATH, 'utf-8') : ''
     const cleaned = this.removeBlock(content, HOOK_BEGIN, HOOK_END)
     writeFileSync(BASHRC_PATH, cleaned + '\n' + HOOK_SNIPPET + '\n', 'utf-8')
+  }
+
+  /** win：把 git-bash hook 装入 ~/.bashrc（若无则创建） */
+  private installGitBash(): void {
+    const content = existsSync(GB_PROFILE) ? readFileSync(GB_PROFILE, 'utf-8') : ''
+    const cleaned = this.removeBlock(content, GB_HOOK_BEGIN, GB_HOOK_END)
+    writeFileSync(GB_PROFILE, cleaned + '\n' + GB_HOOK_SNIPPET + '\n', 'utf-8')
   }
 
   private installPsProfile(path: string): void {
@@ -135,6 +171,10 @@ export class HookInstaller {
         if (!existsSync(p)) continue
         const content = readFileSync(p, 'utf-8')
         writeFileSync(p, this.removeBlock(content, PS_HOOK_BEGIN, PS_HOOK_END), 'utf-8')
+      }
+      if (existsSync(GB_PROFILE)) {
+        const content = readFileSync(GB_PROFILE, 'utf-8')
+        writeFileSync(GB_PROFILE, this.removeBlock(content, GB_HOOK_BEGIN, GB_HOOK_END), 'utf-8')
       }
     } else {
       if (!existsSync(BASHRC_PATH)) return

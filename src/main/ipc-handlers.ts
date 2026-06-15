@@ -31,10 +31,10 @@ export function registerIpcHandlers() {
 
     sender.updateStatusOptimistically(shortName, session)
 
-    // 热切换（仅 mac 支持）：App 退出 claude → trap 续接（切 env + claude -c）
+    // 热切换：写 pending(source 新 env + claude -c 续接)，mac 额外发 SIGINT 中断当前 claude。
+    // Windows 无跨 console 信号，interruptClaude 为空操作 → claude 需用户手动 Ctrl+C 退出后 prompt hook 续接。
     if (hotSwitch) {
-      const cmd = `source ~/.bashrc_${shortName} && claude -c --permission-mode bypassPermissions`
-      await sender.sendToSession(session, cmd)
+      await sender.sendWarmSwitchCommand(session, shortName)
       const claudePid = await scanner.findClaudePid(session.sessionId)
       if (claudePid) await sender.interruptClaude(claudePid)
     } else {

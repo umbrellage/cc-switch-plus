@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
-import type { TerminalSession } from '../../renderer/types'
+import type { TerminalSession, ShellKind } from '../../renderer/types'
 import { IS_WIN, WIN_STATUS_DIR, winSessionKey } from '../platform'
 
 const execFileAsync = promisify(execFile)
@@ -21,6 +21,7 @@ const MAC_APP_PATTERNS: Array<{ match: RegExp; name: string }> = [
 /** win 已知终端应用映射 */
 const WIN_APP_PATTERNS: Array<{ match: RegExp; name: string }> = [
   { match: /WindowsTerminal/i, name: 'Windows Terminal' },
+  { match: /mintty/i, name: 'Git Bash' },
   { match: /WezTerm/i, name: 'WezTerm' },
   { match: /Alacritty/i, name: 'Alacritty' },
   { match: /IntelliJ|idea/i, name: 'IDEA' },
@@ -35,6 +36,7 @@ interface WinProc {
   ppid: number
   name: string
   cmd: string
+  path: string  // ExecutablePath，用于区分 Git Bash vs WSL bash
 }
 
 /**
@@ -134,7 +136,7 @@ export class SessionScanner {
         sessionId: tty, windowId: 0, windowIndex: 0, tabIndex: 0, tty,
         name: cwd || `${appName} - ${shellComm}`,
         columns: 0, rows: 0, profileName: appName, appName,
-        shellPid, isBusy, currentModel: status?.model, currentBaseUrl: status?.baseUrl
+        shellPid, shell: 'bash', isBusy, currentModel: status?.model, currentBaseUrl: status?.baseUrl
       }
     } catch {
       return null
@@ -167,7 +169,7 @@ export class SessionScanner {
       const { stdout } = await execFileAsync(
         'powershell',
         ['-NoProfile', '-Command',
-         'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress'],
+         'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress'],
         { timeout: 8000 }
       )
       const data = JSON.parse(stdout.trim() || '[]')
@@ -178,7 +180,8 @@ export class SessionScanner {
             pid: p.ProcessId,
             ppid: p.ParentProcessId || 0,
             name: p.Name || '',
-            cmd: p.CommandLine || ''
+            cmd: p.CommandLine || '',
+            path: p.ExecutablePath || ''
           })
         }
       }
@@ -202,7 +205,7 @@ export class SessionScanner {
     return '未知'
   }
 
-  /** win：扫描所有 PowerShell/cmd 会话 */
+  /** win：扫描所有 PowerShell / Git Bash 会话 */
   private async listSessionsWin(): Promise<TerminalSession[]> {
     const table = await this.getWinProcessTable()
     if (table.size === 0) return []
@@ -210,9 +213,12 @@ export class SessionScanner {
     const sessions: TerminalSession[] = []
     for (const proc of table.values()) {
       const baseName = proc.name.toLowerCase()
-      // 仅 PowerShell 支持 hook 机制（cmd 无 profile，列出也无法切换，故排除）
-      const isShell = baseName === 'powershell.exe' || baseName === 'pwsh.exe'
-      if (!isShell) continue
+      // 识别 shell 类型：PowerShell 5/7 或 Git Bash（按 exe 路径含 \Git\ 排除 WSL 的 bash.exe）
+      let shell: ShellKind | null = null
+      if (baseName === 'powershell.exe') shell = 'powershell'
+      else if (baseName === 'pwsh.exe') shell = 'pwsh'
+      else if (baseName === 'bash.exe' && /\\git\\/i.test(proc.path)) shell = 'bash'
+      if (!shell) continue
 
       // 跳过无父进程（顶层系统 shell）
       if (proc.ppid <= 0) continue
@@ -220,14 +226,16 @@ export class SessionScanner {
       const appName = this.traceHostAppWin(proc.pid, table)
       const claude = this.findClaudeChildWin(proc.pid, table)
       const status = this.readStatusWin(proc.pid)
+      const shellLabel = shell === 'bash' ? 'git-bash' : baseName.replace('.exe', '')
 
       sessions.push({
         sessionId: winSessionKey(proc.pid),
         windowId: 0, windowIndex: 0, tabIndex: 0,
         tty: '',  // Windows 无 tty
-        name: `${appName} - ${baseName.replace('.exe', '')}`,
+        name: `${appName} - ${shellLabel}`,
         columns: 0, rows: 0, profileName: appName, appName,
         shellPid: proc.pid,
+        shell,
         isBusy: !!claude,
         currentModel: status?.model,
         currentBaseUrl: status?.baseUrl

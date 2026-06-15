@@ -46,6 +46,11 @@ export class ConfigManager {
 
     const p = this.profilePath(target.shortName)
     if (existsSync(p)) rmSync(p)
+    // Windows 下 git-bash 用 .bashrc_xxx，一并删除
+    if (IS_WIN) {
+      const bashrc = join(HOME, `.bashrc_${target.shortName}`)
+      if (existsSync(bashrc)) rmSync(bashrc)
+    }
 
     this.persist(configs.filter((c) => c.id !== id))
   }
@@ -66,6 +71,15 @@ export class ConfigManager {
           const parsed = this.parseContent(shortName, content)
           if (parsed) configs.push(parsed)
         }
+      }
+      // git-bash：扫描 ~/.bashrc_*（export 语法）
+      for (const file of readdirSync(HOME)) {
+        if (!file.startsWith('.bashrc_') || file.includes('.swp') || file.includes('~')) continue
+        const shortName = file.replace('.bashrc_', '')
+        if (configs.some((c) => c.shortName === shortName)) continue
+        const content = readFileSync(join(HOME, file), 'utf-8')
+        const parsed = this.parseContent(shortName, content)
+        if (parsed) configs.push(parsed)
       }
     } else {
       const files = readdirSync(HOME).filter(
@@ -153,12 +167,16 @@ export class ConfigManager {
     return s.replace(/'/g, "''")
   }
 
-  /** 写 profile 文件到磁盘 */
+  /** 写 profile 文件到磁盘（Windows：同时写 .ps1 给 PowerShell 和 .bashrc_xxx 给 git-bash） */
   private writeProfileFile(config: ModelConfig): void {
     if (IS_WIN && !existsSync(WIN_PROFILES_DIR)) {
       mkdirSync(WIN_PROFILES_DIR, { recursive: true })
     }
     writeFileSync(this.profilePath(config.shortName), this.generateContent(config), 'utf-8')
+    // Windows 下额外写 git-bash 版（bash export 语法，无 $env:）
+    if (IS_WIN) {
+      writeFileSync(join(HOME, `.bashrc_${config.shortName}`), this.generateBashrcContent(config), 'utf-8')
+    }
   }
 
   /** 解析 profile 内容为 ModelConfig（平台分支） */

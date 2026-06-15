@@ -310,6 +310,44 @@ body {
   font-family: 'SF Mono', Menlo, monospace;
 }
 
+/* 暖切换提示条（Windows：需手动 Ctrl+C 续接） */
+.warm-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--orange, #ff8a3d);
+  background: rgba(255, 138, 61, 0.10);
+  border: 1px solid rgba(255, 138, 61, 0.35);
+  border-radius: 6px;
+}
+.warm-hint b { color: var(--text); }
+.warm-hint kbd {
+  padding: 1px 5px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.warm-dismiss {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.warm-dismiss:hover { background: var(--surface-2); color: var(--text); }
+
 .session-action { flex-shrink: 0; }
 
 .action-row {
@@ -516,6 +554,55 @@ body {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+/* === Preset chips === */
+.preset-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.preset-label {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-right: 2px;
+}
+.chip {
+  padding: 3px 10px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.chip:hover { border-color: var(--blue); color: var(--text); }
+.chip.active {
+  background: rgba(80, 200, 255, 0.14);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+/* === Inline field error === */
+.field-err {
+  font-size: 10px;
+  color: var(--red);
+  margin-top: 1px;
+}
+.fields input:not(:disabled):focus { border-color: var(--blue); }
+.fields input.err { border-color: var(--red); }
+
+/* === Form-level error (save failure) === */
+.form-err {
+  margin-top: 10px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--red);
+  background: rgba(224, 74, 85, 0.08);
+  border-radius: 6px;
 }
 
 /* === Empty === */
